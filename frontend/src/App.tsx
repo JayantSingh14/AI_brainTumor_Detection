@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Brain, Loader2, Sparkles, Timer } from 'lucide-react';
+import { AlertTriangle, Brain, Layers, Loader2, ScanEye, Sparkles, Timer } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -20,6 +20,24 @@ type PredictionResult = {
   inference_time: number;
   filename?: string;
 };
+
+type SegmentationResult = {
+  filename?: string;
+  threshold: number;
+  coverage: number;
+  tumor_px: number;
+  total_px: number;
+  img_size: number;
+  encoder: string;
+  val_dice: number;
+  timestamp: string;
+  inference_time: number;
+  mask_png: string;
+  overlay_png: string;
+  prob_png: string;
+};
+
+type Mode = 'detection' | 'segmentation';
 
 const CLASS_ORDER = ['glioma', 'meningioma', 'no_tumor', 'pituitary'] as const;
 
@@ -137,11 +155,16 @@ function UploadBox({
 }
 
 export default function App() {
+  const [mode, setMode] = useState<Mode>('detection');
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<PredictionResult | null>(null);
+  const [seg, setSeg] = useState<SegmentationResult | null>(null);
+  const [segThreshold, setSegThreshold] = useState(0.5);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [showProb, setShowProb] = useState(true);
 
   const canAnalyze = useMemo(() => !!file && !loading, [file, loading]);
 
@@ -153,6 +176,7 @@ export default function App() {
     }
     setFile(f);
     setResult(null);
+    setSeg(null);
     setError('');
     const r = new FileReader();
     r.onloadend = () => setPreviewUrl(String(r.result ?? ''));
@@ -163,6 +187,7 @@ export default function App() {
     setFile(null);
     setPreviewUrl('');
     setResult(null);
+    setSeg(null);
     setError('');
   };
 
@@ -171,16 +196,24 @@ export default function App() {
     setLoading(true);
     setError('');
     setResult(null);
+    setSeg(null);
 
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await fetch('http://localhost:8000/predict', { method: 'POST', body: fd });
+      const url =
+        mode === 'segmentation'
+          ? `http://localhost:8000/segment?threshold=${encodeURIComponent(String(segThreshold))}`
+          : 'http://localhost:8000/predict';
+
+      const res = await fetch(url, { method: 'POST', body: fd });
       if (!res.ok) {
         const msg = await res.text();
         throw new Error(msg || 'Failed to analyze image');
       }
-      setResult((await res.json()) as PredictionResult);
+      const json = await res.json();
+      if (mode === 'segmentation') setSeg(json as SegmentationResult);
+      else setResult(json as PredictionResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed');
     } finally {
@@ -204,14 +237,54 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-2xl font-semibold tracking-tight text-zinc-950">
-                  Brain Tumor MRI Classifier
+                  Brain MRI AI Suite
                 </div>
                 <div className="mt-1 text-sm text-black/60">
-                  Upload MRI scan and get AI-powered diagnosis
+                  Choose detection or segmentation from the same upload
                 </div>
               </div>
-              <div className="rounded-full border border-blue-200 bg-white px-4 py-2 text-xs font-semibold text-blue-700 shadow-sm">
-                Desktop • Medical UI
+              <div className="flex items-center gap-3">
+                <div className="inline-flex rounded-full border border-black/10 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('detection');
+                      setResult(null);
+                      setSeg(null);
+                      setError('');
+                    }}
+                    className={[
+                      'inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold transition',
+                      mode === 'detection'
+                        ? 'bg-gradient-to-r from-blue-600 via-sky-600 to-indigo-600 text-white shadow-sm'
+                        : 'text-black/70 hover:bg-black/5',
+                    ].join(' ')}
+                  >
+                    <ScanEye className="h-4 w-4" />
+                    Detection
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('segmentation');
+                      setResult(null);
+                      setSeg(null);
+                      setError('');
+                    }}
+                    className={[
+                      'inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold transition',
+                      mode === 'segmentation'
+                        ? 'bg-gradient-to-r from-blue-600 via-sky-600 to-indigo-600 text-white shadow-sm'
+                        : 'text-black/70 hover:bg-black/5',
+                    ].join(' ')}
+                  >
+                    <Layers className="h-4 w-4" />
+                    Segmentation
+                  </button>
+                </div>
+                <div className="rounded-full border border-blue-200 bg-white px-4 py-2 text-xs font-semibold text-blue-700 shadow-sm">
+                  Desktop • Medical UI
+                </div>
               </div>
             </div>
           </div>
@@ -219,6 +292,51 @@ export default function App() {
           <div className="grid grid-cols-12 gap-8 px-10 py-10">
             <div className="col-span-5">
               <UploadBox disabled={loading} file={file} previewUrl={previewUrl} onPick={pickFile} />
+
+              {mode === 'segmentation' && (
+                <div className="mt-4 rounded-2xl border border-black/10 bg-white p-5">
+                  <div className="text-sm font-semibold text-zinc-950">Segmentation settings</div>
+                  <div className="mt-3 grid grid-cols-12 gap-4 items-center">
+                    <div className="col-span-4 text-xs font-semibold text-black/60">Threshold</div>
+                    <div className="col-span-8">
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={0.9}
+                        step={0.05}
+                        value={segThreshold}
+                        onChange={(e) => setSegThreshold(Number(e.target.value))}
+                        className="w-full accent-blue-600"
+                      />
+                      <div className="mt-1 flex items-center justify-between text-xs text-black/50">
+                        <span>0.10</span>
+                        <span className="font-semibold text-black/70">{segThreshold.toFixed(2)}</span>
+                        <span>0.90</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-black/70">
+                      <input
+                        type="checkbox"
+                        checked={showProb}
+                        onChange={(e) => setShowProb(e.target.checked)}
+                        className="accent-blue-600"
+                      />
+                      Probability map
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-black/70">
+                      <input
+                        type="checkbox"
+                        checked={showOverlay}
+                        onChange={(e) => setShowOverlay(e.target.checked)}
+                        className="accent-blue-600"
+                      />
+                      Overlay
+                    </label>
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
@@ -234,12 +352,12 @@ export default function App() {
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 via-sky-600 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
-                  {loading ? 'Analyzing…' : 'Analyze MRI'}
+                  {loading ? 'Analyzing…' : mode === 'segmentation' ? 'Segment MRI' : 'Analyze MRI'}
                 </button>
                 <button
                   type="button"
                   onClick={reset}
-                  disabled={!file && !result}
+                  disabled={!file && !result && !seg}
                   className="rounded-2xl border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black/70 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Reset
@@ -251,10 +369,93 @@ export default function App() {
               <div className="rounded-2xl border border-black/10 bg-white p-6">
                 <div className="text-sm font-semibold text-zinc-950">Results</div>
                 <div className="mt-1 text-sm text-black/55">
-                  Predicted class, confidence, inference time, and probabilities
+                  {mode === 'segmentation'
+                    ? 'Mask, overlay, probability map, and coverage metrics'
+                    : 'Predicted class, confidence, inference time, and probabilities'}
                 </div>
 
-                {!result ? (
+                {mode === 'segmentation' ? (
+                  !seg ? (
+                    <div className="mt-6 rounded-2xl border border-black/10 bg-zinc-50 p-8 text-sm text-black/60">
+                      Upload an image and click <span className="font-semibold text-black/75">Segment MRI</span>.
+                    </div>
+                  ) : (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, ease: 'easeOut' }}
+                      className="mt-6 space-y-4"
+                    >
+                      <div className="rounded-2xl border border-black/10 bg-white p-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm text-black/55">Tumor coverage</div>
+                            <div className="mt-1 text-4xl font-semibold tracking-tight text-zinc-950">
+                              {seg.coverage.toFixed(1)}%
+                            </div>
+                            <div className="mt-3 flex items-center gap-2 text-sm text-black/55">
+                              <Timer className="h-4 w-4" />
+                              <span>
+                                Inference time:{' '}
+                                <span className="font-semibold text-black/75">{seg.inference_time.toFixed(1)} ms</span>
+                              </span>
+                            </div>
+                            <div className="mt-2 text-xs text-black/50">
+                              Encoder: <span className="font-semibold text-black/70">{seg.encoder}</span> • Size:{' '}
+                              <span className="font-semibold text-black/70">{seg.img_size}×{seg.img_size}</span> • Val
+                              Dice: <span className="font-semibold text-black/70">{seg.val_dice}</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold text-black/60">Threshold</div>
+                            <div className="mt-1 text-2xl font-semibold text-zinc-950">{seg.threshold.toFixed(2)}</div>
+                            <div className="mt-2 text-xs text-black/50">
+                              Tumor pixels:{' '}
+                              <span className="font-semibold text-black/70">{seg.tumor_px.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-6 rounded-2xl border border-black/10 bg-white p-4">
+                          <div className="text-sm font-semibold text-zinc-950">Mask</div>
+                          <div className="mt-3 overflow-hidden rounded-xl border border-black/10 bg-zinc-50">
+                            <img
+                              src={`data:image/png;base64,${seg.mask_png}`}
+                              alt="Mask"
+                              className="h-56 w-full object-contain"
+                            />
+                          </div>
+                        </div>
+                        {showOverlay && (
+                          <div className="col-span-6 rounded-2xl border border-black/10 bg-white p-4">
+                            <div className="text-sm font-semibold text-zinc-950">Overlay</div>
+                            <div className="mt-3 overflow-hidden rounded-xl border border-black/10 bg-zinc-50">
+                              <img
+                                src={`data:image/png;base64,${seg.overlay_png}`}
+                                alt="Overlay"
+                                className="h-56 w-full object-contain"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {showProb && (
+                          <div className="col-span-12 rounded-2xl border border-black/10 bg-white p-4">
+                            <div className="text-sm font-semibold text-zinc-950">Probability map</div>
+                            <div className="mt-3 overflow-hidden rounded-xl border border-black/10 bg-zinc-50">
+                              <img
+                                src={`data:image/png;base64,${seg.prob_png}`}
+                                alt="Probability"
+                                className="h-64 w-full object-contain"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )
+                ) : !result ? (
                   <div className="mt-6 rounded-2xl border border-black/10 bg-zinc-50 p-8 text-sm text-black/60">
                     Upload an image and click <span className="font-semibold text-black/75">Analyze MRI</span>.
                   </div>

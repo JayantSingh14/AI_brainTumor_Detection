@@ -1,17 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Brain Tumor MRI Classifier"
-echo "--------------------------"
+echo "Brain MRI AI Suite (Detection + Segmentation)"
+echo "---------------------------------------------"
 
 if [ ! -f "deploy_effb3.pth" ]; then
   echo "ERROR: deploy_effb3.pth not found in project root."
   exit 1
 fi
 
-python3 -c "import fastapi, uvicorn, torch, timm, albumentations, PIL, numpy" >/dev/null 2>&1 || {
-  echo "Installing Python dependencies..."
-  python3 -m pip install -r requirements.txt
+if [ ! -f "models/segmentation/best_unet_model.pth" ]; then
+  echo "ERROR: models/segmentation/best_unet_model.pth not found."
+  echo "Place the segmentation checkpoint at: models/segmentation/best_unet_model.pth"
+  exit 1
+fi
+
+if [ ! -d ".venv" ]; then
+  echo "Creating virtualenv (.venv)..."
+  python3 -m venv .venv
+fi
+
+source .venv/bin/activate
+
+python -c "import fastapi, uvicorn, torch, timm, albumentations, PIL, numpy, cv2, segmentation_models_pytorch" >/dev/null 2>&1 || {
+  echo "Installing Python dependencies into .venv ..."
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
 }
 
 if [ ! -d "frontend/node_modules" ]; then
@@ -26,44 +40,4 @@ mkdir -p static
 cp -R frontend/dist/* static/
 
 echo "Starting API server on http://localhost:8000"
-python3 inference.py
-
-#!/bin/bash
-# Quick Start Script for Brain Tumor Detection UI
-
-echo "🧠 Brain Tumor Detection - Quick Start"
-echo "======================================"
-echo ""
-
-# Check if model exists
-if [ ! -f "deploy_effb3.pth" ]; then
-    echo "❌ Error: deploy_effb3.pth not found!"
-    echo "Please ensure the model file is in the project root."
-    exit 1
-fi
-
-# Check if static folder exists
-if [ ! -d "static" ]; then
-    echo "📁 Creating static folder..."
-    mkdir static
-fi
-
-echo "✅ Model file found: deploy_effb3.pth"
-echo "✅ Static folder ready"
-echo ""
-echo "🚀 Starting FastAPI server..."
-echo "   → Access the app at: http://localhost:8000"
-echo "   → API docs at:      http://localhost:8000/docs"
-echo "   → Press Ctrl+C to stop"
-echo ""
-
-# Ensure dependencies exist (best-effort)
-python3 -c "import fastapi, uvicorn, torch, timm, albumentations, PIL, numpy" >/dev/null 2>&1
-if [ $? -ne 0 ]; then
-    echo "📦 Installing Python dependencies..."
-    python3 -m pip install -r requirements.txt
-    echo ""
-fi
-
-# Run the server
-python3 inference.py
+python inference.py
