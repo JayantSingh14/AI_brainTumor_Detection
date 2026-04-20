@@ -28,3 +28,4 @@ The frontend calls the API at `http://localhost:8000/predict`.
 - The model weights file `deploy_effb3.pth` is **ignored by default** in `.gitignore`.
 - If you want to store model weights in GitHub, use **Git LFS** (recommended) or upload it as a **Release asset**.
 
+# smart_brainTumor_seg_detection
