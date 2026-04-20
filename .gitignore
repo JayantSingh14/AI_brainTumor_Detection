@@ -26,6 +26,5 @@ static/
 .idea/
 .vscode/
 
-### Model weights (recommended: keep out of git)
-deploy_effb3.pth
+### Model weights (tracked via Git LFS)
 
